@@ -70,9 +70,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     // 3.4 If the path does not exist, create it and add it to the set,
                     // then respond with the Ok(path).
                     //
-                    // println!("got a request! {:?}", &dir_path);
-                    let _ = sender.send(dir_path.to_owned());
-                    existing_dirs.insert(dir_path);
+                    // TODO: Flatten the above conditions within one match
+                    // statement using a tuple (known, exists).
+                    match existing_dirs.contains(&dir_path) {
+                        true => {
+                            println!("found dir: {:?}", &dir_path);
+                            let _ = sender.send(dir_path);
+                        }
+                        false => {
+                            // create the dir.
+                            println!("dir {:?} not found. creating.", &dir_path);
+                            existing_dirs.insert(dir_path.clone());
+                            let _ = sender.send(dir_path);
+                        }
+                    }
                 }
                 DirRequest { close: true, .. } => {
                     // Perform shutdown task.
@@ -87,17 +98,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // With each item from the stream
     while let Some(dir_entry) = dir_stream.next_entry().await? {
-        // println!("dir_entry path: {:?}", dir_entry.path());
-        // println!("dir_entry extension? {:?}", dir_entry.path().extension());
-        let tgd = target_dir_for_extension(&target_root_dir, dir_entry.path()).await;
-        println!(
-            "Theoretical target dir for {:?} is {:?}",
-            dir_entry.path(),
-            tgd
-        );
+        let required_dir_path = target_dir_for_extension(&target_root_dir, dir_entry.path()).await;
+
+        if required_dir_path.is_none() {
+            continue;
+        }
+
         let ttx = tx.clone();
+
         let t = task::spawn(async move {
-            let dir_path = dir_entry.path();
+            let dir_path = required_dir_path.unwrap();
             let (req_tx, req_rx) = oneshot::channel();
 
             let dir_request = DirRequest {
@@ -114,24 +124,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .await
                 .expect("failed to receive data from dir manager");
 
-            // println!("got response! {:?}", res);
+            // TODO: Res is the target path.
+            // Perform file copying here...
+
+            println!("got response! {:?}", res);
         });
 
         tasks.push(t);
     }
 
+    // TODO: Enable log levels. Find a good logger crate.
     // println!("Waiting for tasks...");
     for t in tasks {
         t.await?;
     }
 
-    // use the original mpsc transmitter to send the shutdown request
-    // to the dir_manager task so it closes the channel.
-
-    // TODO: Make the sender optional so we don't have waste cycles
+    // TODO: Make the sender Option<Sender<PathBuf>> so we don't have waste cycles
     // just to create a DirRequest.
     let (_tx, _rx) = oneshot::channel();
 
+    // use the original mpsc transmitter to send the shutdown request
+    // to the dir_manager task so it closes the channel.
     tx.send(DirRequest {
         dir_path: "".into(),
         sender: _tx,
@@ -149,8 +162,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 async fn target_dir_for_extension(tg: &Path, pth: PathBuf) -> Option<PathBuf> {
-    // let tp = Path::new(pth.extension()).to_owned();
-    // tg.join(tp)
     match pth.extension() {
         Some(ext) => {
             let p = Path::new(ext).to_owned();
