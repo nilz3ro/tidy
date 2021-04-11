@@ -212,14 +212,11 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-// Finds the target directory based on file extension.
-// If the path does not have a file extension, it will return `None`.
+/// Finds the target directory based on file extension.
+/// If the path does not have a file extension, it will return `None`.
 async fn target_dir_for_extension(target: &Path, path: PathBuf) -> Option<PathBuf> {
     match path.extension() {
-        Some(ext) => {
-            let p = Path::new(ext).to_owned();
-            Some(target.join(p).to_path_buf())
-        }
+        Some(ext) => Some(target.join(Path::new(ext)).to_path_buf()),
         None => None,
     }
 }
