@@ -1,5 +1,6 @@
+use anyhow::{anyhow, Result};
+use clap::{App, Arg};
 use std::collections::HashSet;
-use std::error::Error;
 use std::path::{Path, PathBuf};
 use tokio::{
     fs::{self, DirBuilder},
@@ -15,22 +16,30 @@ struct DirRequest {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> Result<()> {
+    // Set up CLI.
+    let matches = App::new("Tidy")
+        .version("0.1.0")
+        .author("nilz3ro")
+        .about("clean it up!")
+        .arg(
+            Arg::with_name("dir")
+                .help("the directory to tidy")
+                .index(1)
+                .required(true),
+        )
+        .arg(Arg::with_name("outdir").short("o").help(
+            "the directory where the sorted files will be stored in subdirectories named after their file extension.",
+        ).index(2).required(false))
+        .get_matches();
+
+    let dir = matches.value_of("dir").unwrap();
+    let out = matches.value_of("outdir").unwrap_or("./sorted");
+    // TODO: verify source_dir exists!
+    let source_dir = Path::new(dir).to_path_buf();
+    let target_root_dir = Path::new(out).to_path_buf();
+
     let mut tasks = vec![];
-    // The source directory - the directory that we want to sort.
-    // TODO: get this as a cli arg.
-    let source_dir = Path::new("./sort_me").to_path_buf();
-    // In the future we will support sorting strategies, but for now
-    // the only way to sort will be by file extension.
-    //
-    // So, we will need to know what the target dir for each extension is, and if it exists.
-    // If it doesn't exist, the dir_manager task can create it as requested.
-    //
-    // For now we will only support copying files to target directories that share a common root.
-    // In the future, the user will be able to configure the target directory for each collection in a sorting strategy.
-    //
-    // TODO:  get this as a cli arg.
-    let target_root_dir = Path::new("./sorted");
 
     let (tx, mut rx) = mpsc::channel(48);
 
@@ -46,8 +55,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // The dir creator will check to see if a directory
     // the dir_request.name exists in its internal HashSet and fire off an Result<()> through the
     // transmitter end (a oneshot channel).
-    //
-    // TODO: code here.
     let dir_manager = task::spawn(async move {
         // The set of confirmed existing dirs,
         // this is used to track which target dirs that have been
@@ -206,11 +213,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn target_dir_for_extension(tg: &Path, pth: PathBuf) -> Option<PathBuf> {
-    match pth.extension() {
+// Finds the target directory based on file extension.
+// If the path does not have a file extension, it will return `None`.
+async fn target_dir_for_extension(target: &Path, path: PathBuf) -> Option<PathBuf> {
+    match path.extension() {
         Some(ext) => {
             let p = Path::new(ext).to_owned();
-            Some(tg.join(p).to_path_buf())
+            Some(target.join(p).to_path_buf())
         }
         None => None,
     }
