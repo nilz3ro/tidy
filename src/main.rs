@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use tokio::{
-    fs,
+    fs::{self, DirBuilder},
     sync::{mpsc, oneshot},
     task,
 };
@@ -10,7 +10,7 @@ use tokio::{
 #[derive(Debug)]
 struct DirRequest {
     pub dir_path: PathBuf,
-    pub sender: oneshot::Sender<PathBuf>,
+    pub sender: oneshot::Sender<PathBuf>, // TODO: Make this a Result<PathBuf>
     pub close: bool,
 }
 
@@ -53,6 +53,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // this is used to track which target dirs that have been
         // confirmed.
         let mut existing_dirs = HashSet::new();
+        let mut dir_builder = DirBuilder::new();
 
         while let Some(dir_request) = rx.recv().await {
             match dir_request {
@@ -79,9 +80,29 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         }
                         false => {
                             // create the dir.
-                            println!("dir {:?} not found. creating.", &dir_path);
-                            existing_dirs.insert(dir_path.clone());
-                            let _ = sender.send(dir_path);
+                            println!(
+                                "dir not confirmed: {:?}, checking for existence.",
+                                &dir_path
+                            );
+                            if dir_path.exists() {
+                                println!("The dir exists! adding it to the set.");
+                                existing_dirs.insert(dir_path.clone());
+                                let _ = sender.send(dir_path);
+                            } else {
+                                println!("The dir does not exist. Creating {:?}.", &dir_path);
+                                match dir_builder.recursive(true).create(dir_path.clone()).await {
+                                    Ok(_) => {
+                                        println!("We created the dir.");
+                                        existing_dirs.insert(dir_path.clone());
+                                        let _ = sender.send(dir_path);
+                                    }
+                                    Err(e) => {
+                                        println!("Something went wrong while creating the dir.");
+                                        eprintln!("{:?}", e);
+                                        let _ = sender.send(dir_path);
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -98,8 +119,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // With each item from the stream
     while let Some(dir_entry) = dir_stream.next_entry().await? {
+        // Ignore directories for now.
+        if dir_entry.path().is_dir() {
+            continue;
+        }
+
         let required_dir_path = target_dir_for_extension(&target_root_dir, dir_entry.path()).await;
 
+        // Ignore files with no extension for now.
         if required_dir_path.is_none() {
             continue;
         }
@@ -111,7 +138,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let (req_tx, req_rx) = oneshot::channel();
 
             let dir_request = DirRequest {
-                dir_path,
+                dir_path: dir_path.clone(),
                 sender: req_tx,
                 close: false,
             };
@@ -124,10 +151,28 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .await
                 .expect("failed to receive data from dir manager");
 
+            println!("got response! {:?}", res);
+
             // TODO: Res is the target path.
             // Perform file copying here...
-
-            println!("got response! {:?}", res);
+            match fs::copy(
+                dir_entry.path(),
+                dir_path.clone().join(dir_entry.file_name()),
+            )
+            .await
+            {
+                Ok(_) => {
+                    println!("Moved the file!");
+                }
+                Err(e) => {
+                    println!(
+                        "Could not move: {:?} to {:?}",
+                        dir_entry.file_name(),
+                        dir_path
+                    );
+                    eprintln!("{:?}", e);
+                }
+            };
         });
 
         tasks.push(t);
