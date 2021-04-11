@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use clap::{App, Arg};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -78,33 +78,32 @@ async fn main() -> Result<()> {
                     // 3.4 If the path does not exist, create it and add it to the set,
                     // then respond with the Ok(path).
                     //
-                    // TODO: Flatten the above conditions within one match
-                    // statement using a tuple (known, exists).
+                    // TODO: Flatten and simplify.
                     match existing_dirs.contains(&dir_path) {
                         true => {
-                            println!("found dir: {:?}", &dir_path);
+                            // println!("found dir: {:?}", &dir_path);
                             let _ = sender.send(dir_path);
                         }
                         false => {
                             // create the dir.
-                            println!(
-                                "dir not confirmed: {:?}, checking for existence.",
-                                &dir_path
-                            );
+                            // println!(
+                            // "dir not confirmed: {:?}, checking for existence.",
+                            // &dir_path
+                            // );
                             if dir_path.exists() {
-                                println!("The dir exists! adding it to the set.");
+                                // println!("The dir exists! adding it to the set.");
                                 existing_dirs.insert(dir_path.clone());
                                 let _ = sender.send(dir_path);
                             } else {
-                                println!("The dir does not exist. Creating {:?}.", &dir_path);
+                                // println!("The dir does not exist. Creating {:?}.", &dir_path);
                                 match dir_builder.recursive(true).create(dir_path.clone()).await {
                                     Ok(_) => {
-                                        println!("We created the dir.");
+                                        // println!("We created the dir.");
                                         existing_dirs.insert(dir_path.clone());
                                         let _ = sender.send(dir_path);
                                     }
                                     Err(e) => {
-                                        println!("Something went wrong while creating the dir.");
+                                        eprintln!("Something went wrong while creating the dir.");
                                         eprintln!("{:?}", e);
                                         let _ = sender.send(dir_path);
                                     }
@@ -154,11 +153,11 @@ async fn main() -> Result<()> {
 
             // Send a dir request to the dir creator task.
             // Move the file to the target dir.
-            let res = req_rx
+            let _ = req_rx
                 .await
                 .expect("failed to receive data from dir manager");
 
-            println!("got response! {:?}", res);
+            // println!("got response! {:?}", res);
 
             // TODO: Res is the target path.
             // Perform file copying here...
@@ -169,10 +168,10 @@ async fn main() -> Result<()> {
             .await
             {
                 Ok(_) => {
-                    println!("Moved the file!");
+                    // println!("Moved the file!");
                 }
                 Err(e) => {
-                    println!(
+                    eprintln!(
                         "Could not move: {:?} to {:?}",
                         dir_entry.file_name(),
                         dir_path
@@ -208,7 +207,7 @@ async fn main() -> Result<()> {
 
     dir_manager.await?;
 
-    println!("done!");
+    // println!("done!");
 
     Ok(())
 }
